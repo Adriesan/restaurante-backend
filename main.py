@@ -1,9 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException,status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from pydantic import BaseModel
 from typing import List, Optional
+# --- Nuevos Imports necesarios ---
+
 
 # 1. Configurar la conexión con Neon Tech
 DATABASE_URL = "postgresql://neondb_owner:npg_wIcBRfFXSz10@ep-proud-mode-axrxjeme-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
@@ -100,3 +102,23 @@ def actualizar_platillo(platillo_id: int, datos: PlatilloCrear, db: Session = De
     db.commit()
     db.refresh(platillo_db)
     return platillo_db
+
+
+# ELIMINAR UN PLATILLO DEFINITIVAMENTE
+@app.delete("/platillos/{platillo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_platillo(platillo_id: int, db: Session = Depends(get_db)):
+    # 1. Buscar el platillo en la base de datos
+    platillo_db = db.query(PlatilloBD).filter(PlatilloBD.id == platillo_id).first()
+    
+    # 2. Si no existe, lanzar un error 404
+    if not platillo_db:
+        raise HTTPException(status_code=404, detail="Platillo no encontrado")
+    
+    # 3. Eliminar el registro
+    db.delete(platillo_db)
+    
+    # 4. Confirmar los cambios en la base de datos
+    db.commit()
+    
+    # 5. Retornar una respuesta 204 No Content (éxito sin cuerpo)
+    return None
