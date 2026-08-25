@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Text
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Text, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 from pydantic import BaseModel
 from typing import List, Optional
+import datetime
 
 # 1. Configurar la conexión con Neon Tech
 DATABASE_URL = "postgresql://neondb_owner:npg_wIcBRfFXSz10@ep-proud-mode-axrxjeme-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
@@ -203,3 +204,90 @@ def eliminar_cliente(cliente_id: int, db: Session = Depends(get_db)):
     db.delete(cliente_db)
     db.commit()
     return None
+
+# --- MODELOS SQLALCHEMY ---
+class OrdenBD(Base):
+    __tablename__ = "ordenes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=True)
+    tipo_pedido = Column(String(20), nullable=False)
+    estado = Column(String(20), default="Pendiente")
+    metodo_pago = Column(String(20), nullable=True)
+    total = Column(Float, default=0.0)
+    observaciones = Column(Text, nullable=True)
+
+    cliente = relationship("ClienteBD")
+    detalles = relationship("DetalleOrdenBD", cascade="all, delete-orphan")
+
+class DetalleOrdenBD(Base):
+    __tablename__ = "detalle_ordenes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    orden_id = Column(Integer, ForeignKey("ordenes.id", ondelete="CASCADE"))
+    platillo_id = Column(Integer, ForeignKey("platillos.id"))
+    cantidad = Column(Integer, nullable=False, default=1)
+    precio_unitario = Column(Float, nullable=False)
+    notas = Column(String(200), nullable=True)
+
+    platillo = relationship("PlatilloBD")
+
+# --- ESQUEMAS PYDANTIC ---
+class DetalleCrear(BaseModel):
+    platillo_id: int
+    cantidad: int
+    precio_unitario: float
+    notas: Optional[str] = None
+
+class OrdenCrear(BaseModel):
+    cliente_id: Optional[int] = None
+    tipo_pedido: str
+    observaciones: Optional[str] = None
+    detalles: List[DetalleCrear]
+
+class LiquidarOrden(BaseModel):
+    metodo_pago: str # 'Efectivo', 'Transferencia', 'Tarjeta'
+
+# --- ENDPOINTS ÓRDENES ---
+@app.post("/ordenes")
+def crear_orden(orden: OrdenCrear, db: Session = Depends(get_db)):
+    total = sum(item.cantidad * item.precio_unitario for item in orden.detalles)
+    
+    nueva_orden = OrdenBD(
+        cliente_id=orden.cliente_id,
+        tipo_pedido=orden.tipo_pedido,
+        observaciones=orden.observaciones,
+        total=total,
+        estado="Pendiente"
+    )
+    db.add(nueva_orden)
+    db.commit()
+    db.refresh(nueva_orden)
+
+    for item in orden.detalles:
+        detalle = DetalleOrdenBD(
+            orden_id=nueva_orden.id,
+            platillo_id=item.platillo_id,
+            cantidad=item.cantidad,
+            precio_unitario=item.precio_unitario,
+            notas=item.notas
+        )
+        db.add(detalle)
+
+    db.commit()
+    return {"id": nueva_orden.id, "mensaje": "Orden creada exitosamente"}
+
+@app.get("/ordenes")
+def obtener_ordenes(db: Session = Depends(get_db)):
+    return db.query(OrdenBD).all()
+
+@app.put("/ordenes/{orden_id}/liquidar")
+def liquidar_orden(orden_id: int, datos: LiquidarOrden, db: Session = Depends(get_db)):
+    orden = db.query(OrdenBD).filter(OrdenBD.id == orden_id).first()
+    if not orden:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    
+    orden.metodo_pago = datos.metodo_pago
+    orden.estado = "Pagado"
+    db.commit()
+    return {"mensaje": "Orden liquidada correctamente"}
