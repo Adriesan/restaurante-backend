@@ -248,6 +248,33 @@ class OrdenCrear(BaseModel):
 class LiquidarOrden(BaseModel):
     metodo_pago: str # 'Efectivo', 'Transferencia', 'Tarjeta'
 
+# --- ESQUEMAS DE RESPUESTA PARA DETALLES Y ÓRDENES ---
+class DetalleRespuesta(BaseModel):
+    id: int
+    orden_id: int
+    platillo_id: int
+    cantidad: int
+    precio_unitario: float
+    notas: Optional[str] = None
+    platillo: Optional[PlatilloRespuesta] = None
+
+    class Config:
+        from_attributes = True
+
+class OrdenRespuesta(BaseModel):
+    id: int
+    cliente_id: Optional[int] = None
+    tipo_pedido: str
+    estado: str
+    metodo_pago: Optional[str] = None
+    total: float
+    observaciones: Optional[str] = None
+    cliente: Optional[ClienteRespuesta] = None
+    detalles: List[DetalleRespuesta] = []
+
+    class Config:
+        from_attributes = True
+        
 # --- ENDPOINTS ÓRDENES ---
 @app.post("/ordenes")
 def crear_orden(orden: OrdenCrear, db: Session = Depends(get_db)):
@@ -291,3 +318,11 @@ def liquidar_orden(orden_id: int, datos: LiquidarOrden, db: Session = Depends(ge
     orden.estado = "Pagado"
     db.commit()
     return {"mensaje": "Orden liquidada correctamente"}
+
+
+@app.get("/ordenes/{orden_id}", response_model=OrdenRespuesta)
+def obtener_orden(orden_id: int, db: Session = Depends(get_db)):
+    orden = db.query(OrdenBD).filter(OrdenBD.id == orden_id).first()
+    if not orden:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    return orden
